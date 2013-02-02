@@ -2,6 +2,10 @@
 #include <Arduino.h>
 #include <assert.h>
 #include <avr/interrupt.h>
+#include <avr/io.h>
+#include <avr/pgmspace.h>
+#define NRF_DEBUG 1
+
 #include "nRF8001.h"
 #include "services.h"
 
@@ -10,7 +14,8 @@
 #define PROGMEM __attribute__((section(".progmem.data")))
 #endif
 
-hal_aci_data_t setup_msgs[NB_SETUP_MESSAGES] = SETUP_MESSAGES_CONTENT;
+PROGMEM hal_aci_data_t setup_msgs[NB_SETUP_MESSAGES] = SETUP_MESSAGES_CONTENT;
+hal_aci_data_t cur_setup_msg;
 
 nRFDeviceState nRF8001::getDeviceState()
 {
@@ -41,8 +46,8 @@ nRFCmd nRF8001::setup()
             Serial.print(F("sending setup message number "));
             Serial.println(nextSetupMessage);
 #endif
-            transmitReceive((nRFCommand *)setup_msgs[nextSetupMessage]
-                .buffer, 0);
+            memcpy_P(cur_setup_msg.buffer, setup_msgs[nextSetupMessage].buffer, 32);
+            transmitReceive((nRFCommand *)cur_setup_msg.buffer, 0);
             previousMessageSent = nextSetupMessage;
         } else if (nextSetupMessage >= 0
             && nextSetupMessage > previousMessageSent) {
@@ -104,7 +109,7 @@ nRF8001::nRF8001(uint8_t reset_pin_arg,
     if (reset_pin != -1) {
         pinMode(reset_pin, OUTPUT);
         digitalWrite(reset_pin, LOW);
-        delayMicroseconds(1);
+        delayMicroseconds(100);
         digitalWrite(reset_pin, HIGH);        
     }
 
@@ -148,11 +153,18 @@ void nRF8001::debugAddress(uint8_t *address)
 
 void nRF8001::debugEvent(nRFEvent *event)
 {
-    Serial.print(F("EVENT debug="));
-    Serial.print(event->debug);
-    Serial.print(F(" length="));
-    Serial.print(event->length);
-    Serial.print(F(" event="));
+#if !defined(NRF_VERBOSE_DEBUG)
+    if (event->event != NRF_DATACREDITEVENT)
+#endif
+    {
+        Serial.print(F("EVENT debug="));
+        Serial.print(event->debug);
+        Serial.print(F(" length="));
+        Serial.print(event->length);
+        Serial.print(F(" event="));
+        Serial.print(event->event);
+        Serial.print(" ");
+    }
 
     switch (event->event) {
         case NRF_DEVICESTARTEDEVENT:
@@ -585,8 +597,10 @@ void nRF8001::debugEvent(nRFEvent *event)
             Serial.println(F("KeyRequestEvent"));
             break;
         case NRF_DATACREDITEVENT:
+#if NRF_VERBOSE_DEBUG
             Serial.print(F("DataCreditEvent credits="));
             Serial.println(event->msg.dataCredits);
+#endif
             break;
         case NRF_PIPEERROREVENT:
             Serial.println(F("PipeErrorEvent"));
